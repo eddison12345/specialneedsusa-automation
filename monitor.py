@@ -29,19 +29,21 @@ def scrape_recent_news():
     )
     
     articles = []
-    for item in results.get("data", [])[:8]:
+    # Firecrawl v4+ returns pydantic models
+    items = results.data if hasattr(results, 'data') else results.get("data", [])
+    for item in items[:8]:
         if not item.get("url"):
             continue
         try:
             page = app.scrape(
-                url=item["url"],
+                url=item.get("url") or str(item),
                 formats=["markdown"],
                 only_main_content=True
             )
             articles.append({
-                "title": item.get("title", "Untitled"),
-                "url": item["url"],
-                "source": item.get("source") or item.get("url").split("/")[2],
+                "title": getattr(item, 'title', None) or item.get("title", "Untitled"),
+                "url": getattr(item, 'url', None) or item.get("url"),
+                "source": getattr(item, 'source', None) or (item.get("url") or "").split("/")[2] if item.get("url") else "Unknown",
                 "date": item.get("published_date", "Recent"),
                 "summary": page.markdown[:600] if hasattr(page, 'markdown') else str(page)[:600]
             })
