@@ -5,82 +5,90 @@ Runs weekly via GitHub Actions
 """
 
 import os
-import json
 from datetime import datetime
 from firecrawl import FirecrawlApp
 from agentmail import AgentMail
 
-# Load environment variables
+# Configuration
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
 AGENTMAIL_API_KEY = os.getenv("AGENTMAIL_API_KEY")
 SEND_TO_EMAIL = "admin@specialneedsusa.com"
 INBOX_ID = "trickytruck172@agentmail.to"
 
 if not FIRECRAWL_API_KEY or not AGENTMAIL_API_KEY:
-    raise ValueError("Missing API keys")
+    raise ValueError("Missing FIRECRAWL_API_KEY or AGENTMAIL_API_KEY")
 
-def scrape_news():
+def scrape_recent_news():
+    print("🔎 Searching for recent ABA industry news...")
     app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
     
-    # Search for recent ABA / autism industry news
-    search_result = app.search(
-        query="ABA therapy OR BCBA OR autism insurance OR autism legislation after:2 days",
-        limit=10
+    # Use search to find recent articles
+    results = app.search(
+        query="ABA therapy OR BCBA OR \"autism\" insurance OR \"autism legislation\" OR \"applied behavior analysis\"",
+        limit=12
     )
     
     articles = []
-    for item in search_result.get("data", [])[:7]:
-        if "url" in item:
-            try:
-                scraped = app.scrape(
-                    url=item["url"],
-                    formats=["markdown"],
-                    only_main_content=True
-                )
-                articles.append({
-                    "title": item.get("title", "No title"),
-                    "url": item["url"],
-                    "source": item.get("source", "Unknown"),
-                    "date": item.get("published_date", "Recent"),
-                    "summary": scraped.markdown[:800] if hasattr(scraped, 'markdown') else "No content available",
-                    "newsjack_ideas": "Potential content ideas for specialneedsusa.com directory + clinic listings."
-                })
-            except Exception as e:
-                print(f"Error scraping {item.get('url')}: {e}")
+    for item in results.get("data", [])[:8]:
+        if not item.get("url"):
+            continue
+        try:
+            page = app.scrape(
+                url=item["url"],
+                formats=["markdown"],
+                only_main_content=True
+            )
+            articles.append({
+                "title": item.get("title", "Untitled"),
+                "url": item["url"],
+                "source": item.get("source") or item.get("url").split("/")[2],
+                "date": item.get("published_date", "Recent"),
+                "summary": page.markdown[:600] if hasattr(page, 'markdown') else str(page)[:600]
+            })
+            print(f"✓ Scraped: {item.get('title', 'Article')}")
+        except Exception as e:
+            print(f"⚠️ Failed to scrape {item.get('url')}: {e}")
     
     return articles
 
 def generate_report(articles):
     report = f"# ABA Industry News Report - {datetime.now().strftime('%B %d, %Y')}\n\n"
-    report += "Here are the top recent stories relevant to ABA therapy clinics and specialneedsusa.com:\n\n"
+    report += "Latest relevant news for specialneedsusa.com (ABA therapy directory).\n\n"
     
     for i, article in enumerate(articles, 1):
         report += f"## {i}. {article['title']}\n"
-        report += f"**Source:** {article['source']} | {article['date']}\n"
+        report += f"**Source:** {article['source']} | **Date:** {article['date']}\n"
         report += f"**Link:** {article['url']}\n\n"
-        report += f"{article['summary'][:500]}...\n\n"
-        report += "**Content ideas for specialneedsusa.com:**\n"
-        report += "- " + article.get("newsjack_ideas", "News-jacking opportunity") + "\n\n"
+        report += f"{article['summary']}\n\n"
+        report += "**Newsjacking Ideas:**\n"
+        report += "- Create a directory listing highlight or blog post referencing this news\n"
+        report += "- Target clinics in affected states with updated listings\n\n"
         report += "---\n\n"
     
-    report += "\nReport generated automatically by specialneedsusa-automation."
+    report += "\n---\nReport generated automatically by GitHub Actions."
     return report
 
-def send_report(report):
+def send_email(report):
+    print("📧 Sending report via AgentMail...")
     client = AgentMail(api_key=AGENTMAIL_API_KEY)
     
-    client.inboxes.messages.send(
+    response = client.inboxes.messages.send(
         inbox_id=INBOX_ID,
         to=SEND_TO_EMAIL,
-        subject=f"ABA News Monitor - {datetime.now().strftime('%B %d, %Y')}",
+        subject=f"ABA News Monitor • {datetime.now().strftime('%B %d, %Y')}",
         text=report,
-        html=f"<pre style='white-space: pre-wrap; font-family: Arial'>{report}</pre>"
+        html=f"<pre style='white-space: pre-wrap; font-family: system-ui; line-height: 1.6;'>{report.replace(chr(10), '<br>')}</pre>"
     )
-    print("✅ Report sent successfully to admin@specialneedsusa.com")
+    print("✅ Email sent successfully!")
 
 if __name__ == "__main__":
     print("🚀 Starting ABA News Monitor...")
-    articles = scrape_news()
+    articles = scrape_recent_news()
+    
+    if not articles:
+        print("⚠️ No articles found.")
+        exit(1)
+    
     report = generate_report(articles)
-    send_report(report)
-    print("✅ ABA News Monitor completed.")
+    send_email(report)
+    print("🎉 ABA News Monitor completed successfully.")
