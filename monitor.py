@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ABA Industry News Monitor for specialneedsusa.com
-Robust version for GitHub Actions
+FINAL robust version for GitHub Actions + Firecrawl v4
 """
 
 import os
@@ -28,26 +28,43 @@ def get_aba_news():
     
     try:
         results = fc.search(
-            query="ABA therapy OR BCBA OR \"applied behavior analysis\" OR autism insurance",
-            limit=10
+            query="ABA therapy OR BCBA OR \"applied behavior analysis\" OR autism insurance OR autism legislation",
+            limit=12
         )
         
-        items = results.data if hasattr(results, 'data') else getattr(results, 'data', results.get("data", []))
+        # Robust handling for Firecrawl v4 response
+        if hasattr(results, 'data'):
+            items = results.data
+        elif isinstance(results, dict):
+            items = results.get('data', [])
+        else:
+            items = []
+        
         articles = []
         
-        for item in list(items)[:7]:
-            url = getattr(item, 'url', None) or (item.get('url') if isinstance(item, dict) else None)
+        for item in list(items)[:8]:
+            # Handle both Pydantic model and dict
+            if hasattr(item, 'url'):
+                url = item.url
+                title = getattr(item, 'title', 'Untitled')
+            elif isinstance(item, dict):
+                url = item.get('url')
+                title = item.get('title', 'Untitled')
+            else:
+                continue
+                
             if not url:
                 continue
                 
-            title = getattr(item, 'title', None) or item.get('title', 'No Title')
+            print(f"  → Found: {title[:60]}...")
             
             try:
                 page = fc.scrape(url=url, formats=["markdown"], only_main_content=True)
-                content = getattr(page, 'markdown', None) or (page.get('markdown') if isinstance(page, dict) else str(page))
-                summary = content[:650] if content else "No content available."
-            except Exception:
-                summary = "Could not extract full article."
+                content = getattr(page, 'markdown', None) or (page.get('markdown') if isinstance(page, dict) else '')
+                summary = (content[:700] + "...") if content else "No content extracted."
+            except Exception as scrape_err:
+                print(f"    ⚠️ Scrape failed: {scrape_err}")
+                summary = "Content could not be retrieved."
             
             articles.append({
                 "title": title,
@@ -55,50 +72,53 @@ def get_aba_news():
                 "source": url.split("//")[-1].split("/")[0].replace("www.", ""),
                 "summary": summary
             })
-            print(f"  ✓ {title[:60]}...")
         
+        print(f"✅ Collected {len(articles)} articles")
         return articles
+        
     except Exception as e:
-        print(f"❌ Search error: {e}")
+        print(f"❌ Major search error: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def build_report(articles):
-    lines = [f"# ABA News Report - {datetime.now().strftime('%B %d, %Y')}", "",
-             "Weekly update for specialneedsusa.com ABA directory.\n"]
+    lines = [f"# ABA Industry News Report — {datetime.now().strftime('%B %d, %Y')}", "",
+             "Weekly summary for specialneedsusa.com (ABA therapy directory & clinics).\n"]
     
     if not articles:
-        lines.append("No new articles found this period.")
+        lines.append("⚠️ No articles were found this run. This may be temporary.")
     else:
-        for i, a in enumerate(articles, 1):
-            lines.append(f"## {i}. {a['title']}")
-            lines.append(f"**Source:** {a['source']}")
-            lines.append(f"**URL:** {a['url']}\n")
-            lines.append(a['summary'])
-            lines.append("\n**Opportunity:** Good for newsjacking or creating local clinic content.\n")
-            lines.append("─" * 50 + "\n")
+        for i, article in enumerate(articles, 1):
+            lines.extend([
+                f"## {i}. {article['title']}",
+                f"**Source:** {article['source']}",
+                f"**Link:** {article['url']}\n",
+                article['summary'],
+                "\n**Newsjacking Idea:** Reference this in a blog post or update clinic listings in affected states.",
+                "─" * 60 + "\n"
+            ])
     
-    lines.append("\nGenerated automatically.")
+    lines.append("\nReport generated automatically using Firecrawl + GitHub Actions.")
     return "\n".join(lines)
 
 def send_report(text_report):
-    print("📧 Sending email via AgentMail...")
+    print("📧 Sending report via AgentMail...")
     try:
         client = AgentMail(api_key=AGENTMAIL_API_KEY)
-        html_report = "<pre style='white-space:pre-wrap; font-family:Arial; line-height:1.6;'>" + \
-                     text_report.replace("\n", "<br>") + "</pre>"
+        html_version = "<pre style='white-space:pre-wrap;font-family:Arial;line-height:1.6'>" + \
+                      text_report.replace("\n", "<br>") + "</pre>"
         
         client.inboxes.messages.send(
             inbox_id=INBOX_ID,
             to=SEND_TO,
-            subject=f"ABA News Monitor - {datetime.now().strftime('%B %d, %Y')}",
+            subject=f"ABA News Monitor • {datetime.now().strftime('%B %d, %Y')}",
             text=text_report,
-            html=html_report
+            html=html_version
         )
-        print("✅ Report sent to admin@specialneedsusa.com")
+        print("✅ Email successfully sent to admin@specialneedsusa.com")
     except Exception as e:
-        print(f"❌ Email failed: {e}")
-        print("--- Report content ---")
-        print(text_report)
+        print(f"❌ Failed to send email: {e}")
 
 if __name__ == "__main__":
     articles = get_aba_news()
